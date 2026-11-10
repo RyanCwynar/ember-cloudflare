@@ -22,8 +22,25 @@ final class AppState {
     var appIsActive = true
     var connectionProblem: String?
 
-    /// Someone whose profile is showing, from a mention or an avatar.
-    var shownPersonId: String?
+    /// The sheet over the workspace, if one is open.
+    var sheet: Sheet?
+
+    enum Sheet: Identifiable, Hashable {
+        case newDirect, newRoom, people, profile
+        case person(String)
+        case roomSettings(String)
+
+        var id: String {
+            switch self {
+            case .newDirect: "newDirect"
+            case .newRoom: "newRoom"
+            case .people: "people"
+            case .profile: "profile"
+            case let .person(id): "person-\(id)"
+            case let .roomSettings(id): "room-\(id)"
+            }
+        }
+    }
 
     private var workspaceSocket: Socket?
     /// Rendered bodies by message id and update time, since parsing markup on every redraw adds up.
@@ -136,7 +153,101 @@ final class AppState {
         return blocks
     }
 
-    func showPerson(_ userId: String) { shownPersonId = userId }
+    func showPerson(_ userId: String) { sheet = .person(userId) }
+
+    /// Everyone in the directory, active people first, by name.
+    var directory: [DirectoryUser] {
+        people.values.sorted { a, b in
+            (a.status == "active") != (b.status == "active") ? a.status == "active" : a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+    }
+
+    // MARK: Room actions
+
+    /// Adds a room the server just answered with, unless the workspace socket got there first.
+    private func adopt(_ room: Room) {
+        if let index = rooms.firstIndex(where: { $0.id == room.id }) {
+            var kept = room
+            kept.unread = rooms[index].unread
+            kept.involvement = rooms[index].involvement ?? room.involvement
+            rooms[index] = kept
+        } else {
+            var added = room
+            added.involvement = added.involvement ?? (room.isDirect ? "everything" : "mentions")
+            rooms.append(added)
+        }
+    }
+
+    /// Opens the DM with exactly these people, starting it if there isn't one.
+    func openDirect(with userIds: [String]) async throws {
+        guard let api else { return }
+        let room = try await api.startDirect(with: userIds)
+        adopt(room)
+        selectedRoomId = room.id
+    }
+
+    func createRoom(name: String, isPrivate: Bool, memberIds: [String]) async throws {
+        guard let api else { return }
+        let room = try await api.createRoom(name: name, isPrivate: isPrivate, memberIds: memberIds)
+        adopt(room)
+        selectedRoomId = room.id
+    }
+
+    func changeRoom(_ roomId: String, name: String?, isPrivate: Bool?, memberIds: [String]?) async throws {
+        guard let api else { return }
+        adopt(try await api.changeRoom(roomId, name: name, isPrivate: isPrivate, memberIds: memberIds))
+    }
+
+    func deleteRoom(_ roomId: String) async throws {
+        try await api?.deleteRoom(roomId)
+        forget(roomId)
+    }
+
+    func leaveRoom(_ roomId: String) async throws {
+        try await api?.leaveRoom(roomId)
+        forget(roomId)
+    }
+
+    private func forget(_ roomId: String) {
+        rooms.removeAll { $0.id == roomId }
+        roomStores.removeValue(forKey: roomId)?.close()
+        if selectedRoomId == roomId { selectedRoomId = sortedSharedRooms.first?.id }
+    }
+
+    func isStarred(_ roomId: String) -> Bool { favorites.contains(roomId) }
+
+    func toggleStar(_ roomId: String) async {
+        guard let api else { return }
+        do { favorites = try await api.setFavorite(roomId, !isStarred(roomId)).rooms } catch { connectionProblem = error.localizedDescription }
+    }
+
+    func setInvolvement(_ roomId: String, _ involvement: Involvement) async {
+        guard let api else { return }
+        do {
+            let saved = try await api.setInvolvement(roomId, involvement)
+            if let index = rooms.firstIndex(where: { $0.id == roomId }) { rooms[index].involvement = saved }
+        } catch {
+            connectionProblem = error.localizedDescription
+        }
+    }
+
+    /// Picks the next room up or down the sidebar, or the next unread one.
+    func selectNeighbor(down: Bool, unreadOnly: Bool) {
+        let order = (starredRooms + sortedSharedRooms + directs).map(\.id)
+        guard !order.isEmpty else { return }
+        let current = selectedRoomId.flatMap { order.firstIndex(of: $0) } ?? (down ? -1 : order.count)
+        var index = current
+        while true {
+            index += down ? 1 : -1
+            guard order.indices.contains(index) else { return }
+            if !unreadOnly || room(order[index])?.unread == true { selectedRoomId = order[index]; return }
+        }
+    }
+
+    func profileChanged(_ profile: Profile) {
+        if let me { self.me = Me(id: me.id, name: profile.name, administrator: me.administrator) }
+        Task { await reloadDirectory() }
+    }
 
     func avatarURL(for userId: String) -> URL? {
         guard let path = people[userId]?.avatarUrl else { return nil }

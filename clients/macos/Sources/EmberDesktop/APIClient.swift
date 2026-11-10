@@ -119,6 +119,118 @@ final class APIClient: @unchecked Sendable {
         try await send(Directory.self, "/api/users")
     }
 
+    // MARK: Rooms and DMs
+
+    private struct NewRoom: Encodable {
+        let name: String
+        let kind: String
+        let memberIds: [String]?
+    }
+
+    func newRoomForm() async throws -> NewRoomForm {
+        try await send(NewRoomForm.self, "/api/rooms/new")
+    }
+
+    func createRoom(name: String, isPrivate: Bool, memberIds: [String]) async throws -> Room {
+        let body = NewRoom(name: name, kind: isPrivate ? "closed" : "open", memberIds: isPrivate ? memberIds : nil)
+        return try await send(RoomAnswer.self, "/api/rooms", method: "POST", body: body).room
+    }
+
+    private struct NewDirect: Encodable { let userIds: [String] }
+
+    /// Starts a DM with these people, or answers the one that already has exactly them.
+    func startDirect(with userIds: [String]) async throws -> Room {
+        try await send(RoomAnswer.self, "/api/directs", method: "POST", body: NewDirect(userIds: userIds)).room
+    }
+
+    func roomSettings(_ roomId: String) async throws -> RoomSettings {
+        try await send(RoomSettings.self, "/api/rooms/\(roomId)/settings")
+    }
+
+    private struct RoomChanges: Encodable {
+        let name: String?
+        let kind: String?
+        let memberIds: [String]?
+    }
+
+    func changeRoom(_ roomId: String, name: String?, isPrivate: Bool?, memberIds: [String]?) async throws -> Room {
+        let kind = isPrivate.map { $0 ? "closed" : "open" }
+        let body = RoomChanges(name: name, kind: kind, memberIds: isPrivate == true ? memberIds : nil)
+        return try await send(RoomAnswer.self, "/api/rooms/\(roomId)", method: "PATCH", body: body).room
+    }
+
+    func deleteRoom(_ roomId: String) async throws {
+        try await sendIgnoringBody("/api/rooms/\(roomId)", method: "DELETE")
+    }
+
+    func leaveRoom(_ roomId: String) async throws {
+        try await sendIgnoringBody("/api/rooms/\(roomId)/membership", method: "DELETE")
+    }
+
+    private struct FavoriteChange: Encodable { let favorite: Bool }
+
+    func setFavorite(_ roomId: String, _ favorite: Bool) async throws -> Favorites {
+        try await send(FavoritesAnswer.self, "/api/rooms/\(roomId)/favorite", method: "PUT", body: FavoriteChange(favorite: favorite)).favorites
+    }
+
+    private struct InvolvementChange: Encodable { let involvement: String }
+
+    func setInvolvement(_ roomId: String, _ involvement: Involvement) async throws -> String {
+        try await send(InvolvementAnswer.self, "/api/rooms/\(roomId)/involvement", method: "PUT", body: InvolvementChange(involvement: involvement.rawValue)).involvement
+    }
+
+    // MARK: People and profile
+
+    func person(_ userId: String) async throws -> Person {
+        try await send(PersonAnswer.self, "/api/users/\(userId)").person
+    }
+
+    func profile() async throws -> Profile {
+        try await send(ProfileAnswer.self, "/api/users/me/profile").profile
+    }
+
+    struct ProfileChanges: Encodable {
+        var name: String?
+        var emailAddress: String?
+        var password: String?
+        var bio: String?
+        var currentPassword: String?
+    }
+
+    func changeProfile(_ changes: ProfileChanges) async throws -> Profile {
+        try await send(ProfileAnswer.self, "/api/users/me/profile", method: "PATCH", body: changes).profile
+    }
+
+    /// Uploads a picture as your avatar: the file as `avatar`, and a JPEG within 512×512 as `variant`,
+    /// which is what the web app makes in the browser before sending.
+    func changeAvatar(file: Data, fileName: String, contentType: String, variant: Data) async throws -> Profile {
+        let boundary = "ember-\(UUID().uuidString)"
+        var body = Data()
+        func part(_ name: String, _ filename: String, _ type: String, _ data: Data) {
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\nContent-Type: \(type)\r\n\r\n".utf8))
+            body.append(data)
+            body.append(Data("\r\n".utf8))
+        }
+        part("avatar", fileName, contentType, file)
+        part("variant", "variant.jpg", "image/jpeg", variant)
+        body.append(Data("--\(boundary)--\r\n".utf8))
+        var request = try request("/api/users/me/avatar", method: "PUT")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
+        request.httpBody = body
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            let message = (try? JSONDecoder().decode(ProblemAnswer.self, from: data))?.error ?? "The server answered \(status)."
+            throw APIError.server(status: status, message: message)
+        }
+        return try JSONDecoder().decode(ProfileAnswer.self, from: data).profile
+    }
+
+    func removeAvatar() async throws -> Profile {
+        try await send(ProfileAnswer.self, "/api/users/me/avatar", method: "DELETE").profile
+    }
+
     // MARK: Sockets
 
     /// A WebSocket upgrade request for `path`, carrying the session cookie and the same-origin headers.

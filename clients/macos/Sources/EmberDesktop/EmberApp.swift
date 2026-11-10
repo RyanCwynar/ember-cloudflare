@@ -29,6 +29,14 @@ struct EmberApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About Ember") { showAbout() }
             }
+            CommandGroup(replacing: .newItem) {
+                Button("New Message…") { state.sheet = .newDirect }
+                    .keyboardShortcut("n")
+                    .disabled(state.phase != .signedIn)
+                Button("New Room…") { state.sheet = .newRoom }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .disabled(state.phase != .signedIn)
+            }
             CommandGroup(after: .appInfo) {
                 Button("Sign Out") { Task { await state.signOut() } }
                     .disabled(state.phase != .signedIn)

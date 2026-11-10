@@ -28,20 +28,29 @@ the email and password you use on the web.
 
 ## What it does
 
-- Signs in with email and password. The session cookie is stored in the system cookie store, so you
+- **Sign-in.** Email and password. The session cookie is stored in the system cookie store, so you
   stay signed in between launches.
-- Shows the sidebar: starred rooms, rooms in the workspace's shared order, and DMs ordered by latest
-  activity. Unread rooms are shown in bold, and the Dock badge counts them.
-- Shows a room's timeline live: new messages, edits, deletes, reactions, who's present, and who's
-  typing. Scrolling to the top loads older messages.
-- Sends messages. Return sends, and Shift-Return or Option-Return starts a new line. You can edit and
-  delete your own messages (administrators can delete anyone's), and add or remove reactions.
-- Shows image attachments inline and links other files for download.
-- When a room turns unread while the app is in the background, it posts a local notification. Clicking
-  the notification opens that room.
+- **Sidebar.** Starred rooms, rooms in the workspace's shared order, and DMs ordered by latest
+  activity. Unread rooms are shown in bold, and the Dock badge counts them. Option-Up/Down moves
+  between rooms, and adding Shift moves between unread ones.
+- **Messages.** Ember's formatting is shown: bold, italic, strikethrough, code and code blocks,
+  quotes, lists, links, @mentions and link previews. Images show inline, and other files are links.
+- **Composer.** Light Markdown (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, fenced code
+  blocks, `> quotes`, `-`/`1.` lists). Typing `@` offers people to mention. Return sends, and
+  Shift-Return or Option-Return starts a new line.
+- **Threads.** Reply in a thread from a message's hover bar or right-click menu. The thread opens
+  beside the room, and a reply can also be sent to the room.
+- **Message actions.** Edit and delete your own messages (administrators can delete anyone's), and
+  add or remove reactions.
+- **DMs and rooms.** Start a DM or group DM (⌘N), create an open or private room (⇧⌘N), star rooms,
+  set each room's notification level, rename it, make it private, choose its members, delete it, or
+  leave it.
+- **People.** A searchable directory. Each person's profile has a Message button. You can edit your
+  own name, bio, email, password and photo.
+- **Notifications.** When a room turns unread while the app is in the background, it posts a local
+  notification. Clicking it opens that room.
 
-Not yet: threads (they show only a reply count), uploads, search, huddles, workspace settings, rich-text
-formatting, or signing in with Memberful or a sign-in link.
+Not yet: uploads, search, message permalinks, workspace administration, and huddles.
 
 ## How it talks to Ember
 

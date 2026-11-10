@@ -134,6 +134,84 @@ struct Message: Codable, Hashable, Identifiable {
     var createdDate: Date { EmberDate.parse(createdAt) ?? .distantPast }
 }
 
+struct RoomPerson: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let member: Bool
+}
+
+struct NewRoomForm: Codable {
+    let people: [User]
+}
+
+struct RoomSettings: Codable {
+    let room: Room
+    let canAdminister: Bool
+    let people: [RoomPerson]
+}
+
+struct RoomAnswer: Codable {
+    let room: Room
+}
+
+struct FavoritesAnswer: Codable {
+    let favorites: Favorites
+}
+
+struct InvolvementAnswer: Codable {
+    let involvement: String
+}
+
+struct Person: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let bio: String?
+    let role: String
+    let status: String
+    let avatarUrl: String
+    let agent: Bool?
+    let emailAddress: String?
+}
+
+struct PersonAnswer: Codable {
+    let person: Person
+}
+
+struct Profile: Codable, Hashable {
+    let name: String
+    let emailAddress: String?
+    let bio: String?
+    let avatarUrl: String
+    let avatar: Bool
+    let password: Bool
+}
+
+struct ProfileAnswer: Codable {
+    let profile: Profile
+}
+
+/// Notification levels (`INVOLVEMENTS`), as a room's bell offers them.
+enum Involvement: String, CaseIterable, Identifiable {
+    case everything, mentions, nothing, invisible
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .everything: "All messages"
+        case .mentions: "Only @mentions"
+        case .nothing: "Nothing"
+        case .invisible: "Nothing, and hide it"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .everything: "bell.fill"
+        case .mentions: "at"
+        case .nothing: "bell.slash"
+        case .invisible: "eye.slash"
+        }
+    }
+}
+
 /// What `/api/session` and `/api/me` answer.
 struct UserAnswer: Codable {
     let user: Me

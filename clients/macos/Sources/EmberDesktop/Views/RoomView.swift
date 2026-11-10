@@ -22,11 +22,36 @@ struct RoomView: View {
         }
         .navigationTitle(room.isDirect ? state.title(of: room) : "#\(state.title(of: room))")
         .navigationSubtitle(subtitle)
+        .toolbar {
+            ToolbarItemGroup {
+                Button { Task { await state.toggleStar(room.id) } } label: {
+                    Image(systemName: state.isStarred(room.id) ? "star.fill" : "star")
+                        .foregroundStyle(state.isStarred(room.id) ? Brand.accent : .secondary)
+                }
+                .help(state.isStarred(room.id) ? "Unstar" : "Star")
+                Menu {
+                    ForEach(Involvement.allCases) { level in
+                        Button { Task { await state.setInvolvement(room.id, level) } } label: {
+                            if currentInvolvement == level { Label(level.label, systemImage: "checkmark") } else { Text(level.label) }
+                        }
+                    }
+                } label: {
+                    Image(systemName: currentInvolvement.symbol)
+                }
+                .help("Notifications: \(currentInvolvement.label)")
+                Button { state.sheet = .roomSettings(room.id) } label: { Image(systemName: room.isDirect ? "info.circle" : "gearshape") }
+                    .help(room.isDirect ? "Details" : "Room settings")
+            }
+        }
         .alert("Something went wrong", isPresented: .constant(store.lastError != nil)) {
             Button("OK") { store.lastError = nil }
         } message: {
             Text(store.lastError ?? "")
         }
+    }
+
+    private var currentInvolvement: Involvement {
+        Involvement(rawValue: state.room(room.id)?.involvement ?? "") ?? (room.isDirect ? .everything : .mentions)
     }
 
     private var subtitle: String {

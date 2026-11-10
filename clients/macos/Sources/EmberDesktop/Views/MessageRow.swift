@@ -19,11 +19,14 @@ struct MessageRow: View {
                 Color.clear.frame(width: 36, height: 1)
             } else {
                 Avatar(userId: message.creator.id, name: message.creator.name, size: 36)
+                    .onTapGesture { state.showPerson(message.creator.id) }
+                    .help("View profile")
             }
             VStack(alignment: .leading, spacing: 3) {
                 if !continued {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(message.creator.name).fontWeight(.semibold)
+                            .onTapGesture { state.showPerson(message.creator.id) }
                         if state.people[message.creator.id]?.agent == true {
                             Text("Agent").font(.caption2.bold()).padding(.horizontal, 4)
                                 .background(Capsule().fill(Color.secondary.opacity(0.2)))
