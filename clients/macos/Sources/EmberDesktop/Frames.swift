@@ -17,13 +17,15 @@ enum RoomServerFrame: Decodable {
     case typing(User, typing: Bool, threadId: String?)
     case history(before: String, messages: [Message], hasMore: Bool)
     case messageChecked(stored: [String], missing: [String])
+    case threadOpened(parentId: String, parent: Message?, messages: [Message], hasMore: Bool)
+    case threadHistory(parentId: String, before: String, messages: [Message], hasMore: Bool)
     case error(message: String, clientMessageId: String?)
     case pong
     case other(String)
 
     private enum K: String, CodingKey {
         case type, you, present, seq, messages, hasMore, deletedIds, message, messageId, boost, boostId
-        case user, userId, typing, threadId, before, stored, missing, clientMessageId
+        case user, userId, typing, threadId, before, stored, missing, clientMessageId, parentId, parent
     }
 
     init(from decoder: Decoder) throws {
@@ -72,6 +74,18 @@ enum RoomServerFrame: Decodable {
                 hasMore: try c.decode(Bool.self, forKey: .hasMore))
         case "message.checked":
             self = .messageChecked(stored: try c.decode([String].self, forKey: .stored), missing: try c.decode([String].self, forKey: .missing))
+        case "thread.opened":
+            self = .threadOpened(
+                parentId: try c.decode(String.self, forKey: .parentId),
+                parent: try c.decodeIfPresent(Message.self, forKey: .parent),
+                messages: try c.decode([Message].self, forKey: .messages),
+                hasMore: try c.decode(Bool.self, forKey: .hasMore))
+        case "thread.history":
+            self = .threadHistory(
+                parentId: try c.decode(String.self, forKey: .parentId),
+                before: try c.decode(String.self, forKey: .before),
+                messages: try c.decode([Message].self, forKey: .messages),
+                hasMore: try c.decode(Bool.self, forKey: .hasMore))
         case "error":
             self = .error(message: try c.decode(String.self, forKey: .message), clientMessageId: try c.decodeIfPresent(String.self, forKey: .clientMessageId))
         case "pong":
@@ -125,7 +139,7 @@ enum WorkspaceServerFrame: Decodable {
 
 /// What the client sends on a room socket. Encoded by hand to match the protocol's flat objects.
 enum RoomClientFrame {
-    case messageCreate(clientMessageId: String, body: String)
+    case messageCreate(clientMessageId: String, body: String, parentId: String? = nil, alsoSend: Bool = false)
     case messageUpdate(messageId: String, body: String)
     case messageDelete(messageId: String)
     case boostCreate(messageId: String, content: String)
@@ -134,22 +148,34 @@ enum RoomClientFrame {
     case typingStop
     case historyBefore(before: String)
     case messageCheck(clientMessageIds: [String])
+    case threadOpen(parentId: String)
+    case threadClose(parentId: String)
+    case threadBefore(parentId: String, before: String)
     case presenceVisible(Bool)
     case ping
 
     var json: [String: Any] {
         switch self {
-        case let .messageCreate(id, body): ["type": "message.create", "clientMessageId": id, "body": body]
-        case let .messageUpdate(id, body): ["type": "message.update", "messageId": id, "body": body]
-        case let .messageDelete(id): ["type": "message.delete", "messageId": id]
-        case let .boostCreate(id, content): ["type": "boost.create", "messageId": id, "content": content]
-        case let .boostDelete(id): ["type": "boost.delete", "boostId": id]
-        case .typingStart: ["type": "typing.start"]
-        case .typingStop: ["type": "typing.stop"]
-        case let .historyBefore(before): ["type": "history.before", "before": before]
-        case let .messageCheck(ids): ["type": "message.check", "clientMessageIds": ids]
-        case let .presenceVisible(visible): ["type": "presence.visible", "visible": visible]
-        case .ping: ["type": "ping"]
+        case let .messageCreate(id, body, parentId, alsoSend):
+            var frame: [String: Any] = ["type": "message.create", "clientMessageId": id, "body": body]
+            if let parentId {
+                frame["parentId"] = parentId
+                if alsoSend { frame["alsoSend"] = true }
+            }
+            return frame
+        case let .messageUpdate(id, body): return ["type": "message.update", "messageId": id, "body": body]
+        case let .messageDelete(id): return ["type": "message.delete", "messageId": id]
+        case let .boostCreate(id, content): return ["type": "boost.create", "messageId": id, "content": content]
+        case let .boostDelete(id): return ["type": "boost.delete", "boostId": id]
+        case .typingStart: return ["type": "typing.start"]
+        case .typingStop: return ["type": "typing.stop"]
+        case let .historyBefore(before): return ["type": "history.before", "before": before]
+        case let .messageCheck(ids): return ["type": "message.check", "clientMessageIds": ids]
+        case let .threadOpen(id): return ["type": "thread.open", "parentId": id]
+        case let .threadClose(id): return ["type": "thread.close", "parentId": id]
+        case let .threadBefore(id, before): return ["type": "thread.before", "parentId": id, "before": before]
+        case let .presenceVisible(visible): return ["type": "presence.visible", "visible": visible]
+        case .ping: return ["type": "ping"]
         }
     }
 

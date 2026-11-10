@@ -35,6 +35,19 @@ final class LiveServerTests: XCTestCase {
         store.toggleBoost("👍", on: sent)
         try await waitUntil { store.messages.first { $0.id == sent.id }?.boosts.count == 1 }
 
+        // A thread: open it, reply only to it, and see the reply there but not in the room.
+        store.openThread(sent.id)
+        try await waitUntil { store.threadParent?.id == sent.id && !store.threadLoading }
+        store.sendMessage("**threaded** reply", parentId: sent.id)
+        try await waitUntil { store.threadReplies.contains { $0.plainText == "threaded reply" } }
+        XCTAssertFalse(store.messages.contains { $0.plainText == "threaded reply" })
+        let reply = try XCTUnwrap(store.threadReplies.first)
+        XCTAssertTrue(reply.body.contains("<strong>threaded</strong>"))
+        try await waitUntil { store.messages.first { $0.id == sent.id }?.thread?.count == 1 }
+        store.delete(reply)
+        try await waitUntil { store.threadReplies.isEmpty }
+        store.closeThread()
+
         store.delete(sent)
         try await waitUntil { !store.messages.contains { $0.id == sent.id } }
         store.close()

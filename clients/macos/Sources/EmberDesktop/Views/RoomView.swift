@@ -5,19 +5,23 @@ struct RoomView: View {
     let room: Room
     let store: RoomStore
 
-    @State private var draft = ""
+    @State private var draft = Draft()
     @State private var editing: Message?
-    @FocusState private var composerFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            timeline
-            Divider()
-            composer
+        HSplitView {
+            VStack(spacing: 0) {
+                timeline
+                Divider()
+                composer
+            }
+            .frame(minWidth: 380)
+            if store.openThreadId != nil {
+                ThreadPanel(store: store)
+            }
         }
         .navigationTitle(room.isDirect ? state.title(of: room) : "#\(state.title(of: room))")
         .navigationSubtitle(subtitle)
-        .onAppear { composerFocused = true }
         .alert("Something went wrong", isPresented: .constant(store.lastError != nil)) {
             Button("OK") { store.lastError = nil }
         } message: {
@@ -49,14 +53,13 @@ struct RoomView: View {
                             message: message,
                             continued: continues(index),
                             isMine: store.isMine(message),
-                            myId: state.me?.id,
                             onBoost: { store.toggleBoost($0, on: message) },
-                            onEdit: { editing = message; draft = message.plainText; composerFocused = true },
+                            onReply: { store.openThread(message.parentId ?? message.id) },
+                            onEdit: { startEditing(message) },
                             onDelete: { store.delete(message) })
                     }
-                    ForEach(store.pending) { pending in
-                        PendingRow(pending: pending, name: state.me?.name ?? "", userId: state.me?.id ?? "",
-                                   onRetry: { store.retry(pending.id) }, onDiscard: { store.discard(pending.id) })
+                    ForEach(store.roomPending) { pending in
+                        PendingRow(pending: pending, onRetry: { store.retry(pending.id) }, onDiscard: { store.discard(pending.id) })
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -64,7 +67,7 @@ struct RoomView: View {
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: store.messages.last?.id) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: store.pending.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+            .onChange(of: store.roomPending.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
 
@@ -88,30 +91,14 @@ struct RoomView: View {
                 HStack {
                     Text("Editing message").font(.caption.bold())
                     Spacer()
-                    Button("Cancel") { editing = nil; draft = "" }.buttonStyle(.link).font(.caption)
+                    Button("Cancel") { editing = nil; draft = Draft() }.buttonStyle(.link).font(.caption)
                 }
                 .padding(.horizontal, 4)
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(placeholder, text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...8)
-                    .focused($composerFocused)
-                    .onKeyPress(.return, phases: .down) { press in
-                        // Return sends; Shift-Return or Option-Return adds a line, as in the web app.
-                        if press.modifiers.contains(.shift) || press.modifiers.contains(.option) { return .ignored }
-                        submit()
-                        return .handled
-                    }
-                    .onChange(of: draft) { _, text in if editing == nil { store.composerChanged(isEmpty: text.isEmpty) } }
-                    .disabled(store.gone)
-                Button(action: submit) { Image(systemName: "paperplane.fill") }
-                    .buttonStyle(.borderless)
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
+            Composer(draft: $draft, placeholder: placeholder, disabled: store.gone,
+                     onChange: { text in if editing == nil { store.composerChanged(isEmpty: text.isEmpty) } },
+                     onSend: submit)
+                .id(editing?.id ?? "new")
         }
         .padding(12)
     }
@@ -129,13 +116,19 @@ struct RoomView: View {
         }
     }
 
+    private func startEditing(_ message: Message) {
+        let (text, mentions) = ComposerMarkup.editableText(from: message.body) { state.name(of: $0) }
+        editing = message
+        draft = Draft(text: text, mentions: mentions)
+    }
+
     private func submit() {
         if let editing {
-            store.edit(editing, to: draft)
+            store.edit(editing, to: draft.text, mentions: draft.liveMentions)
             self.editing = nil
         } else {
-            store.sendMessage(draft)
+            store.sendMessage(draft.text, mentions: draft.liveMentions)
         }
-        draft = ""
+        draft = Draft()
     }
 }

@@ -1,11 +1,14 @@
 import Foundation
 import Observation
 
-/// One room's timeline, kept by its socket (`/api/rooms/:id/socket`).
+/// One room's timeline, kept by its socket (`/api/rooms/:id/socket`), and the thread open beside it.
 ///
 /// The room numbers its changes (`seq`); on reconnect the store names the latest it saw (`since`) and
 /// the room answers with only what changed (`resumed`). Messages sent while the socket was down stay
 /// pending and are checked with `message.check` once it's back.
+///
+/// Replies sent only to a thread reach this socket only while that thread is open (`thread.open`), so
+/// the open thread is named again whenever the socket reconnects.
 @MainActor
 @Observable
 final class RoomStore {
@@ -24,6 +27,14 @@ final class RoomStore {
     var lastError: String?
     var visible = true
 
+    // The open thread.
+    private(set) var openThreadId: String?
+    private(set) var threadParent: Message?
+    private(set) var threadReplies: [Message] = []
+    private(set) var threadHasMore = false
+    private(set) var threadLoading = false
+    private(set) var threadTyping = false
+
     private var seq: Int?
     private var socket: Socket?
     private var typingTimers: [String: Timer] = [:]
@@ -34,7 +45,11 @@ final class RoomStore {
         let id: String  // clientMessageId
         let text: String
         let body: String
+        let parentId: String?
+        let alsoSend: Bool
         var failed: String?
+
+        var showsInRoom: Bool { parentId == nil || alsoSend }
     }
 
     init(roomId: String, api: APIClient, myId: String) {
@@ -58,9 +73,9 @@ final class RoomStore {
         socket.onStateChange = { [weak self] state in
             guard let self else { return }
             self.connected = state == .open
-            if state == .open, !self.pending.isEmpty {
-                self.send(.messageCheck(clientMessageIds: self.pending.map(\.id)))
-            }
+            guard state == .open else { return }
+            if !self.pending.isEmpty { self.send(.messageCheck(clientMessageIds: self.pending.map(\.id))) }
+            if let thread = self.openThreadId { self.send(.threadOpen(parentId: thread)) }
         }
         self.socket = socket
         socket.connect()
@@ -86,32 +101,37 @@ final class RoomStore {
         send(.presenceVisible(visible))
     }
 
+    var roomPending: [PendingMessage] { pending.filter(\.showsInRoom).filter { $0.parentId == nil } }
+    var threadPending: [PendingMessage] { pending.filter { $0.parentId != nil && $0.parentId == openThreadId } }
+
     // MARK: Actions
 
-    func sendMessage(_ text: String) {
+    /// Sends what the composer holds, as markup, to the room or, with `parentId`, to that thread.
+    func sendMessage(_ text: String, mentions: [ComposerMarkup.Mention] = [], parentId: String? = nil, alsoSend: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let id = UUID().uuidString.lowercased()
-        let body = bodyMarkup(fromPlainText: trimmed)
-        pending.append(PendingMessage(id: id, text: trimmed, body: body))
+        let body = ComposerMarkup.markup(from: trimmed, mentions: mentions)
+        pending.append(PendingMessage(id: id, text: trimmed, body: body, parentId: parentId, alsoSend: alsoSend))
         stopTyping()
-        send(.messageCreate(clientMessageId: id, body: body))
+        send(.messageCreate(clientMessageId: id, body: body, parentId: parentId, alsoSend: alsoSend))
     }
 
     func retry(_ pendingId: String) {
         guard let index = pending.firstIndex(where: { $0.id == pendingId }) else { return }
         pending[index].failed = nil
-        send(.messageCreate(clientMessageId: pending[index].id, body: pending[index].body))
+        let p = pending[index]
+        send(.messageCreate(clientMessageId: p.id, body: p.body, parentId: p.parentId, alsoSend: p.alsoSend))
     }
 
     func discard(_ pendingId: String) {
         pending.removeAll { $0.id == pendingId }
     }
 
-    func edit(_ message: Message, to text: String) {
+    func edit(_ message: Message, to text: String, mentions: [ComposerMarkup.Mention]) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        send(.messageUpdate(messageId: message.id, body: bodyMarkup(fromPlainText: trimmed)))
+        send(.messageUpdate(messageId: message.id, body: ComposerMarkup.markup(from: trimmed, mentions: mentions)))
     }
 
     func delete(_ message: Message) {
@@ -155,6 +175,34 @@ final class RoomStore {
 
     func isMine(_ message: Message) -> Bool { message.creator.id == myId }
 
+    // MARK: Threads
+
+    func openThread(_ parentId: String) {
+        guard parentId != openThreadId else { return }
+        if let old = openThreadId { send(.threadClose(parentId: old)) }
+        openThreadId = parentId
+        threadParent = messages.first { $0.id == parentId }
+        threadReplies = []
+        threadHasMore = false
+        threadLoading = true
+        send(.threadOpen(parentId: parentId))
+    }
+
+    func closeThread() {
+        guard let id = openThreadId else { return }
+        send(.threadClose(parentId: id))
+        openThreadId = nil
+        threadParent = nil
+        threadReplies = []
+        threadTyping = false
+    }
+
+    func loadEarlierReplies() {
+        guard let id = openThreadId, threadHasMore, !threadLoading, let oldest = threadReplies.first else { return }
+        threadLoading = true
+        send(.threadBefore(parentId: id, before: oldest.id))
+    }
+
     // MARK: Frames
 
     private func handle(_ text: String) {
@@ -171,47 +219,66 @@ final class RoomStore {
             self.present = present
             self.seq = seq
             self.hasMore = hasMore
-            reconcilePending()
+            reconcilePending(messages)
         case let .resumed(changed, deletedIds, present, seq):
-            for message in changed { upsert(message) }
+            for message in changed { apply(message) }
             messages.removeAll { deletedIds.contains($0.id) }
+            threadReplies.removeAll { deletedIds.contains($0.id) }
             self.present = present
             self.seq = seq
-            reconcilePending()
+            reconcilePending(changed)
         case let .messageCreated(message, seq):
             self.seq = seq
             clearTyping(message.creator.id)
-            upsert(message)
+            apply(message)
             pending.removeAll { $0.id == message.clientMessageId }
         case let .messageUpdated(message, seq):
             self.seq = seq
-            upsert(message)
+            apply(message)
         case let .messageDeleted(id, seq):
             self.seq = seq
             messages.removeAll { $0.id == id }
+            threadReplies.removeAll { $0.id == id }
+            if id == openThreadId { closeThread() }
         case let .boostCreated(boost, seq):
             self.seq = seq
-            if let index = messages.firstIndex(where: { $0.id == boost.messageId }), !messages[index].boosts.contains(where: { $0.id == boost.id }) {
-                messages[index].boosts.append(boost)
+            mutate(boost.messageId) { message in
+                if !message.boosts.contains(where: { $0.id == boost.id }) { message.boosts.append(boost) }
             }
         case let .boostDeleted(boostId, messageId, seq):
             self.seq = seq
-            if let index = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[index].boosts.removeAll { $0.id == boostId }
-            }
+            mutate(messageId) { $0.boosts.removeAll { $0.id == boostId } }
         case let .presenceJoined(user):
             if !present.contains(where: { $0.id == user.id }) { present.append(user) }
         case let .presenceLeft(userId):
             present.removeAll { $0.id == userId }
             clearTyping(userId)
         case let .typing(user, isTyping, threadId):
-            guard threadId == nil, user.id != myId else { return }
+            guard user.id != myId else { return }
+            if let threadId {
+                // Only @ember types in threads, as it answers there.
+                if threadId == openThreadId { threadTyping = isTyping }
+                return
+            }
             if isTyping { startTyping(user) } else { clearTyping(user.id) }
         case let .history(_, older, hasMore):
             let known = Set(messages.map(\.id))
             messages = older.filter { $0.isInRoom && !known.contains($0.id) } + messages
             self.hasMore = hasMore
             loadingHistory = false
+        case let .threadOpened(parentId, parent, replies, hasMore):
+            guard parentId == openThreadId else { return }
+            threadParent = parent ?? threadParent
+            threadReplies = replies
+            threadHasMore = hasMore
+            threadLoading = false
+            reconcilePending(replies)
+        case let .threadHistory(parentId, _, older, hasMore):
+            guard parentId == openThreadId else { return }
+            let known = Set(threadReplies.map(\.id))
+            threadReplies = older.filter { !known.contains($0.id) } + threadReplies
+            threadHasMore = hasMore
+            threadLoading = false
         case let .messageChecked(stored, missing):
             pending.removeAll { stored.contains($0.id) }
             for id in missing { retry(id) }
@@ -222,25 +289,40 @@ final class RoomStore {
                 lastError = message
             }
             loadingHistory = false
+            threadLoading = false
         case .pong, .other:
             break
         }
     }
 
-    /// Puts `message` in its place: replaces the stored copy, or inserts it by time. Replies sent only to
-    /// a thread update their parent's summary through `message.updated`, so they're left out here.
-    private func upsert(_ message: Message) {
+    /// Puts a new or changed message everywhere it shows: the room's timeline (unless it's a reply sent
+    /// only to its thread), the open thread's replies, and the thread's parent.
+    private func apply(_ message: Message) {
         if let index = messages.firstIndex(where: { $0.id == message.id }) {
             if message.isInRoom { messages[index] = message } else { messages.remove(at: index) }
-            return
+        } else if message.isInRoom {
+            let index = messages.lastIndex { $0.createdDate <= message.createdDate }.map { $0 + 1 } ?? 0
+            messages.insert(message, at: index)
         }
-        guard message.isInRoom else { return }
-        let index = messages.lastIndex { $0.createdDate <= message.createdDate }.map { $0 + 1 } ?? 0
-        messages.insert(message, at: index)
+        if message.id == openThreadId { threadParent = message }
+        if let parentId = message.parentId, parentId == openThreadId {
+            if let index = threadReplies.firstIndex(where: { $0.id == message.id }) {
+                threadReplies[index] = message
+            } else {
+                let index = threadReplies.lastIndex { $0.createdDate <= message.createdDate }.map { $0 + 1 } ?? 0
+                threadReplies.insert(message, at: index)
+            }
+        }
     }
 
-    private func reconcilePending() {
-        let stored = Set(messages.map(\.clientMessageId))
+    private func mutate(_ id: String, _ change: (inout Message) -> Void) {
+        if let i = messages.firstIndex(where: { $0.id == id }) { change(&messages[i]) }
+        if let i = threadReplies.firstIndex(where: { $0.id == id }) { change(&threadReplies[i]) }
+        if threadParent?.id == id, var parent = threadParent { change(&parent); threadParent = parent }
+    }
+
+    private func reconcilePending(_ arrived: [Message]) {
+        let stored = Set(arrived.map(\.clientMessageId)).union(messages.map(\.clientMessageId))
         pending.removeAll { stored.contains($0.id) }
     }
 

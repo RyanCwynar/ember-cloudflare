@@ -5,8 +5,9 @@ struct MessageRow: View {
     let message: Message
     let continued: Bool
     let isMine: Bool
-    let myId: String?
     let onBoost: (String) -> Void
+    /// Opens the message's thread; nil inside a thread, where replies can't have their own.
+    let onReply: (() -> Void)?
     let onEdit: () -> Void
     let onDelete: () -> Void
 
@@ -37,9 +38,19 @@ struct MessageRow: View {
                 }
                 content
                 if !message.boosts.isEmpty { boosts }
-                if let thread = message.thread {
-                    Text("\(thread.count) \(thread.count == 1 ? "reply" : "replies")")
-                        .font(.caption.bold()).foregroundStyle(.tint)
+                if let thread = message.thread, let onReply {
+                    Button(action: onReply) {
+                        HStack(spacing: 6) {
+                            HStack(spacing: -4) {
+                                ForEach(thread.people.prefix(4)) { Avatar(userId: $0.id, name: $0.name, size: 18) }
+                            }
+                            Text("\(thread.count) \(thread.count == 1 ? "reply" : "replies")").font(.caption.bold()).foregroundStyle(.tint)
+                            if let latest = EmberDate.parse(thread.latestAt) {
+                                Text(latest, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             Spacer(minLength: 0)
@@ -60,26 +71,13 @@ struct MessageRow: View {
         } else if let file = message.attachment {
             Attachment(file: file)
         } else {
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(LocalizedStringKey(markdownSafe(message.plainText)))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                MessageBody(message: message)
                 if message.editedAt != nil {
                     Text("(edited)").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
-    }
-
-    /// Plain text through LocalizedStringKey makes bare links clickable, but would also read `*` and `_`
-    /// as Markdown; escaping those keeps the text as it was written.
-    private func markdownSafe(_ text: String) -> String {
-        var out = ""
-        for ch in text {
-            if "\\*_`~[]".contains(ch) { out.append("\\") }
-            out.append(ch)
-        }
-        return out
     }
 
     private var boosts: some View {
@@ -88,7 +86,7 @@ struct MessageRow: View {
         return HStack(spacing: 4) {
             ForEach(order, id: \.self) { content in
                 let boosts = grouped[content] ?? []
-                let mine = boosts.contains { $0.booster.id == myId }
+                let mine = boosts.contains { $0.booster.id == state.me?.id }
                 Button { onBoost(content) } label: {
                     Text("\(content) \(boosts.count)").font(.caption)
                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -105,6 +103,10 @@ struct MessageRow: View {
             ForEach(quickReactions.prefix(3), id: \.self) { emoji in
                 Button(emoji) { onBoost(emoji) }.buttonStyle(.borderless)
             }
+            if let onReply {
+                Button(action: onReply) { Image(systemName: "bubble.left.and.text.bubble.right") }
+                    .buttonStyle(.borderless).help("Reply in thread")
+            }
             Menu {
                 ForEach(quickReactions.dropFirst(3), id: \.self) { emoji in Button(emoji) { onBoost(emoji) } }
             } label: { Image(systemName: "face.smiling") }
@@ -118,6 +120,7 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var menu: some View {
+        if let onReply { Button("Reply in Thread", action: onReply) }
         Button("Copy Text") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(message.plainText, forType: .string)
@@ -157,8 +160,6 @@ struct Attachment: View {
 
 struct PendingRow: View {
     let pending: RoomStore.PendingMessage
-    let name: String
-    let userId: String
     let onRetry: () -> Void
     let onDiscard: () -> Void
 

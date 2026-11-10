@@ -22,7 +22,12 @@ final class AppState {
     var appIsActive = true
     var connectionProblem: String?
 
+    /// Someone whose profile is showing, from a mention or an avatar.
+    var shownPersonId: String?
+
     private var workspaceSocket: Socket?
+    /// Rendered bodies by message id and update time, since parsing markup on every redraw adds up.
+    @ObservationIgnored private var renderedBodies: [String: [RichBlock]] = [:]
     private var roomStores: [String: RoomStore] = [:]
 
     // MARK: Signing in
@@ -113,6 +118,25 @@ final class AppState {
     func room(_ id: String) -> Room? { rooms.first { $0.id == id } }
 
     func title(of room: Room) -> String { room.title(me: me?.id) }
+
+    func name(of userId: String) -> String? { people[userId]?.name }
+
+    /// The people an @mention can name: everyone active but me.
+    var mentionable: [DirectoryUser] {
+        people.values.filter { $0.status == "active" && $0.id != me?.id }
+    }
+
+    func blocks(for message: Message) -> [RichBlock] {
+        let key = "\(message.id)@\(message.updatedAt)"
+        if let cached = renderedBodies[key] { return cached }
+        let known = Dictionary(message.mentions.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let renderer = RichTextRenderer(name: { [people] id in people[id]?.name ?? known[id] }, server: api?.server)
+        let blocks = renderer.blocks(message.body)
+        renderedBodies[key] = blocks
+        return blocks
+    }
+
+    func showPerson(_ userId: String) { shownPersonId = userId }
 
     func avatarURL(for userId: String) -> URL? {
         guard let path = people[userId]?.avatarUrl else { return nil }
