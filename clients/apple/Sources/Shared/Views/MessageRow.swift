@@ -1,0 +1,175 @@
+import SwiftUI
+
+struct MessageRow: View {
+    @Environment(AppState.self) private var state
+    let message: Message
+    let continued: Bool
+    let isMine: Bool
+    let onBoost: (String) -> Void
+    /// Opens the message's thread; nil inside a thread, where replies can't have their own.
+    let onReply: (() -> Void)?
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if continued {
+                Color.clear.frame(width: 36, height: 1)
+            } else {
+                Avatar(userId: message.creator.id, name: message.creator.name, size: 36)
+                    .onTapGesture { state.showPerson(message.creator.id) }
+                    .help("View profile")
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                if !continued {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(message.creator.name).fontWeight(.semibold)
+                            .onTapGesture { state.showPerson(message.creator.id) }
+                        if state.people[message.creator.id]?.agent == true {
+                            Text("Agent").font(.caption2.bold()).padding(.horizontal, 4)
+                                .background(Capsule().fill(Color.secondary.opacity(0.2)))
+                        }
+                        Text(message.createdDate, format: .dateTime.hour().minute())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let parentText = message.parentText, message.parentId != nil {
+                    Label(parentText.isEmpty ? "Replied in a thread" : parentText, systemImage: "arrowshape.turn.up.left")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                content
+                if !message.boosts.isEmpty { boosts }
+                if let thread = message.thread, let onReply {
+                    Button(action: onReply) {
+                        HStack(spacing: 6) {
+                            HStack(spacing: -4) {
+                                ForEach(thread.people.prefix(4)) { Avatar(userId: $0.id, name: $0.name, size: 18) }
+                            }
+                            Text("\(thread.count) \(thread.count == 1 ? "reply" : "replies")").font(.caption.bold()).foregroundStyle(.tint)
+                            if let latest = EmberDate.parse(thread.latestAt) {
+                                Text(latest, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, continued ? 2 : 10)
+        .padding(.bottom, 2)
+        .background(hovering ? Color.secondary.opacity(0.06) : .clear)
+        .overlay(alignment: .topTrailing) { if hovering && message.deleted != true { actions } }
+        .onHover { hovering = $0 }
+        .contextMenu { menu }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if message.deleted == true {
+            Text("This message was deleted.").italic().foregroundStyle(.secondary)
+        } else if let file = message.attachment {
+            Attachment(file: file)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                MessageBody(message: message)
+                if message.editedAt != nil {
+                    Text("(edited)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var boosts: some View {
+        let grouped = Dictionary(grouping: message.boosts, by: \.content)
+        let order = message.boosts.map(\.content).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        return HStack(spacing: 4) {
+            ForEach(order, id: \.self) { content in
+                let boosts = grouped[content] ?? []
+                let mine = boosts.contains { $0.booster.id == state.me?.id }
+                Button { onBoost(content) } label: {
+                    Text("\(content) \(boosts.count)").font(.caption)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(mine ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+                .help(boosts.map(\.booster.name).joined(separator: ", "))
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 2) {
+            ForEach(quickReactions.prefix(3), id: \.self) { emoji in
+                Button(emoji) { onBoost(emoji) }.buttonStyle(.borderless)
+            }
+            if let onReply {
+                Button(action: onReply) { Image(systemName: "bubble.left.and.text.bubble.right") }
+                    .buttonStyle(.borderless).help("Reply in thread")
+            }
+            Menu {
+                ForEach(quickReactions.dropFirst(3), id: \.self) { emoji in Button(emoji) { onBoost(emoji) } }
+            } label: { Image(systemName: "face.smiling") }
+                .menuStyle(.borderlessButton).fixedSize()
+        }
+        .padding(4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.background).shadow(radius: 1))
+        .padding(.trailing, 16)
+        .offset(y: -6)
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        if let onReply { Button("Reply in Thread", action: onReply) }
+        if message.deleted != true {
+            Menu("React") {
+                ForEach(quickReactions, id: \.self) { emoji in Button(emoji) { onBoost(emoji) } }
+            }
+        }
+        Button("Copy Link") {
+            if let link = state.permalink(for: message) {
+                Platform.copy(link.absoluteString)
+            }
+        }
+        Button("Copy Text") {
+            Platform.copy(message.plainText)
+        }
+        if isMine && message.attachment == nil && message.deleted != true {
+            Button("Edit", action: onEdit)
+        }
+        if isMine || state.me?.administrator == true {
+            Button("Delete", role: .destructive, action: onDelete)
+        }
+    }
+}
+
+struct PendingRow: View {
+    let pending: RoomStore.PendingMessage
+    let onRetry: () -> Void
+    let onDiscard: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Color.clear.frame(width: 36, height: 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pending.text).foregroundStyle(.secondary)
+                if let failed = pending.failed {
+                    HStack {
+                        Text(failed).foregroundStyle(.red)
+                        Button("Retry", action: onRetry).linkButton()
+                        Button("Discard", action: onDiscard).linkButton()
+                    }
+                    .font(.caption)
+                } else {
+                    Text("Sending…").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+    }
+}

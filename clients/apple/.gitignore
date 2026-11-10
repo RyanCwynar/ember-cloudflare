@@ -1,0 +1,6 @@
+.build/
+build/
+.swiftpm/
+iOS/build/
+iOS/EmberPhone.xcodeproj/
+iOS/Info.plist
