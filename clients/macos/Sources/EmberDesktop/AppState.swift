@@ -30,6 +30,7 @@ final class AppState {
         case newDirect, newRoom, people, profile, search
         case person(String)
         case image(StoredFile)
+        case web(path: String, title: String)
         case roomSettings(String)
 
         var id: String {
@@ -42,6 +43,7 @@ final class AppState {
             case let .person(id): "person-\(id)"
             case let .roomSettings(id): "room-\(id)"
             case let .image(file): "image-\(file.id)"
+            case let .web(path, _): "web-\(path)"
             }
         }
     }

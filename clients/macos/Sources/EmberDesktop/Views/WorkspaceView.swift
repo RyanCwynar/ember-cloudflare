@@ -68,6 +68,14 @@ struct WorkspaceView: View {
                 Menu {
                     Button("Your Profile…") { state.sheet = .profile }
                     Button("People…") { state.sheet = .people }
+                    Button("Search…") { state.sheet = .search }
+                    Divider()
+                    Button("Workspace Settings…") { state.sheet = .web(path: "/account/edit", title: "Workspace settings") }
+                    if me.administrator {
+                        Button("Custom Styles…") { state.sheet = .web(path: "/account/custom_styles/edit", title: "Custom styles") }
+                        Button("Chat Bots…") { state.sheet = .web(path: "/account/bots", title: "Chat bots") }
+                        Button("New AI Agent…") { state.sheet = .web(path: "/account/agents/new", title: "New agent") }
+                    }
                     Divider()
                     Button("Reload") { Task { await state.reloadSidebar(); await state.reloadDirectory() } }
                     Button("Sign Out") { Task { await state.signOut() } }

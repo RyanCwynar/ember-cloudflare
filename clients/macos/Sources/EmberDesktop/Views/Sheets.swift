@@ -16,6 +16,7 @@ struct WorkspaceSheet: View {
         case let .roomSettings(id): RoomSettingsSheet(roomId: id)
         case let .image(file): ImageViewer(file: file)
         case .search: SearchSheet()
+        case let .web(path, title): WebSheet(path: path, title: title)
         }
     }
 }
