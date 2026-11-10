@@ -27,7 +27,7 @@ final class AppState {
     var sheet: Sheet?
 
     enum Sheet: Identifiable, Hashable {
-        case newDirect, newRoom, people, profile
+        case newDirect, newRoom, people, profile, search
         case person(String)
         case image(StoredFile)
         case roomSettings(String)
@@ -38,6 +38,7 @@ final class AppState {
             case .newRoom: "newRoom"
             case .people: "people"
             case .profile: "profile"
+            case .search: "search"
             case let .person(id): "person-\(id)"
             case let .roomSettings(id): "room-\(id)"
             case let .image(file): "image-\(file.id)"
@@ -157,6 +158,46 @@ final class AppState {
     }
 
     func showPerson(_ userId: String) { sheet = .person(userId) }
+
+    // MARK: Permalinks
+
+    /// A message's address, as the web app's Copy link gives it.
+    func permalink(for message: Message) -> URL? {
+        let path = message.parentId.map { "/rooms/\(message.roomId)/threads/\($0)/@\(message.id)" } ?? "/rooms/\(message.roomId)/@\(message.id)"
+        return api.flatMap { URL(string: path, relativeTo: $0.server)?.absoluteURL }
+    }
+
+    /// Opens a room at a message, and its thread for a reply.
+    func open(roomId: String, messageId: String?, threadParentId: String? = nil) {
+        guard room(roomId) != nil else { connectionProblem = "That room isn't one of yours."; return }
+        selectedRoomId = roomId
+        guard let store = store(for: roomId) else { return }
+        if let threadParentId {
+            store.jump(to: threadParentId)
+            store.openThread(threadParentId)
+        } else {
+            store.jump(to: messageId)
+        }
+    }
+
+    /// Opens a link to this Ember in the app: a room, a message's permalink, or a thread. Answers false
+    /// for anything else, which opens in the browser.
+    func openInApp(_ url: URL) -> Bool {
+        guard let server = api?.server, url.host == server.host, url.port == server.port else { return false }
+        let parts = url.path.split(separator: "/").map(String.init)
+        guard parts.count >= 2, parts[0] == "rooms" else { return false }
+        let roomId = parts[1]
+        if parts.count >= 4, parts[2] == "threads" {
+            open(roomId: roomId, messageId: nil, threadParentId: parts[3])
+        } else if parts.count >= 4, parts[2] == "messages" {
+            open(roomId: roomId, messageId: parts[3])
+        } else if parts.count >= 3, parts[2].hasPrefix("@") {
+            open(roomId: roomId, messageId: String(parts[2].dropFirst()))
+        } else {
+            open(roomId: roomId, messageId: nil)
+        }
+        return true
+    }
 
     /// Downloads a file with the session's cookie to Downloads, then shows it in Finder.
     func download(_ file: StoredFile) {

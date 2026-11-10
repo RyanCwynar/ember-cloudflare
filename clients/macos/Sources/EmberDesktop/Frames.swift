@@ -16,6 +16,8 @@ enum RoomServerFrame: Decodable {
     case presenceLeft(userId: String)
     case typing(User, typing: Bool, threadId: String?)
     case history(before: String, messages: [Message], hasMore: Bool)
+    case historyAfter(after: String, messages: [Message], hasNewer: Bool)
+    case historyAround(messages: [Message], hasMore: Bool, hasNewer: Bool, around: String?)
     case messageChecked(stored: [String], missing: [String])
     case threadOpened(parentId: String, parent: Message?, messages: [Message], hasMore: Bool)
     case threadHistory(parentId: String, before: String, messages: [Message], hasMore: Bool)
@@ -25,7 +27,7 @@ enum RoomServerFrame: Decodable {
 
     private enum K: String, CodingKey {
         case type, you, present, seq, messages, hasMore, deletedIds, message, messageId, boost, boostId
-        case user, userId, typing, threadId, before, stored, missing, clientMessageId, parentId, parent
+        case user, userId, typing, threadId, before, stored, missing, clientMessageId, parentId, parent, after, hasNewer, around
     }
 
     init(from decoder: Decoder) throws {
@@ -72,6 +74,17 @@ enum RoomServerFrame: Decodable {
                 before: try c.decode(String.self, forKey: .before),
                 messages: try c.decode([Message].self, forKey: .messages),
                 hasMore: try c.decode(Bool.self, forKey: .hasMore))
+        case "history.after":
+            self = .historyAfter(
+                after: try c.decode(String.self, forKey: .after),
+                messages: try c.decode([Message].self, forKey: .messages),
+                hasNewer: try c.decode(Bool.self, forKey: .hasNewer))
+        case "history.around":
+            self = .historyAround(
+                messages: try c.decode([Message].self, forKey: .messages),
+                hasMore: try c.decode(Bool.self, forKey: .hasMore),
+                hasNewer: try c.decode(Bool.self, forKey: .hasNewer),
+                around: try c.decodeIfPresent(String.self, forKey: .around))
         case "message.checked":
             self = .messageChecked(stored: try c.decode([String].self, forKey: .stored), missing: try c.decode([String].self, forKey: .missing))
         case "thread.opened":
@@ -147,6 +160,8 @@ enum RoomClientFrame {
     case typingStart
     case typingStop
     case historyBefore(before: String)
+    case historyAfter(after: String)
+    case historyAround(messageId: String?)
     case messageCheck(clientMessageIds: [String])
     case threadOpen(parentId: String)
     case threadClose(parentId: String)
@@ -170,6 +185,11 @@ enum RoomClientFrame {
         case .typingStart: return ["type": "typing.start"]
         case .typingStop: return ["type": "typing.stop"]
         case let .historyBefore(before): return ["type": "history.before", "before": before]
+        case let .historyAfter(after): return ["type": "history.after", "after": after]
+        case let .historyAround(id):
+            var frame: [String: Any] = ["type": "history.around"]
+            if let id { frame["messageId"] = id }
+            return frame
         case let .messageCheck(ids): return ["type": "message.check", "clientMessageIds": ids]
         case let .threadOpen(id): return ["type": "thread.open", "parentId": id]
         case let .threadClose(id): return ["type": "thread.close", "parentId": id]

@@ -124,6 +124,12 @@ struct MessageRow: View {
     @ViewBuilder
     private var menu: some View {
         if let onReply { Button("Reply in Thread", action: onReply) }
+        Button("Copy Link") {
+            if let link = state.permalink(for: message) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link.absoluteString, forType: .string)
+            }
+        }
         Button("Copy Text") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(message.plainText, forType: .string)

@@ -212,6 +212,51 @@ enum Involvement: String, CaseIterable, Identifiable {
     }
 }
 
+/// A search, with its filters (`Search` in packages/protocol/src/search.ts).
+struct Search: Codable, Hashable {
+    var q: String = ""
+    var `in`: String?
+    var from: String?
+    var withMe: Bool?
+    var hasLink: Bool?
+    var hasFile: Bool?
+    var inThread: Bool?
+
+    var isSearchable: Bool {
+        !q.trimmingCharacters(in: .whitespaces).isEmpty || `in` != nil || from != nil
+            || withMe == true || hasLink == true || hasFile == true || inThread == true
+    }
+
+    /// The query `searchQuery` writes.
+    func query(sort: String, cursor: Int?) -> String {
+        var items = [URLQueryItem(name: "q", value: q)]
+        if let `in` { items.append(URLQueryItem(name: "in", value: `in`)) }
+        if let from { items.append(URLQueryItem(name: "from", value: from)) }
+        if withMe == true { items.append(URLQueryItem(name: "with", value: "me")) }
+        if hasLink == true { items.append(URLQueryItem(name: "has", value: "link")) }
+        if hasFile == true { items.append(URLQueryItem(name: "has", value: "file")) }
+        if inThread == true { items.append(URLQueryItem(name: "is", value: "thread")) }
+        if sort != "newest" { items.append(URLQueryItem(name: "sort", value: sort)) }
+        if let cursor { items.append(URLQueryItem(name: "cursor", value: String(cursor))) }
+        var components = URLComponents()
+        components.queryItems = items
+        return components.percentEncodedQuery ?? ""
+    }
+}
+
+struct SearchMatch: Codable, Hashable {
+    let message: Message
+    let words: [String]
+}
+
+struct SearchResults: Codable {
+    let search: Search?
+    let matches: [SearchMatch]
+    let next: Int?
+    let rooms: [Room]
+    let recent: [Search]
+}
+
 /// What `/api/session` and `/api/me` answer.
 struct UserAnswer: Codable {
     let user: Me

@@ -37,6 +37,11 @@ struct EmberApp: App {
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                     .disabled(state.phase != .signedIn)
             }
+            CommandGroup(after: .textEditing) {
+                Button("Search…") { state.sheet = .search }
+                    .keyboardShortcut("f")
+                    .disabled(state.phase != .signedIn)
+            }
             CommandGroup(after: .appInfo) {
                 Button("Sign Out") { Task { await state.signOut() } }
                     .disabled(state.phase != .signedIn)

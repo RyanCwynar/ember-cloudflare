@@ -61,6 +61,8 @@ struct WorkspaceView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                Button { state.sheet = .search } label: { Image(systemName: "magnifyingglass") }
+                    .buttonStyle(.borderless).help("Search (⌘F)")
                 Button { state.sheet = .people } label: { Image(systemName: "person.2") }
                     .buttonStyle(.borderless).help("People")
                 Menu {

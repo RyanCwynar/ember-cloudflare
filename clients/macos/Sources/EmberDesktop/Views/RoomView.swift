@@ -98,6 +98,7 @@ struct RoomView: View {
                             onReply: { store.openThread(message.parentId ?? message.id) },
                             onEdit: { startEditing(message) },
                             onDelete: { store.delete(message) })
+                        .background(store.highlightedId == message.id ? Brand.accent.opacity(0.14) : .clear)
                     }
                     ForEach(store.roomPending) { pending in
                         PendingRow(pending: pending, onRetry: { store.retry(pending.id) }, onDiscard: { store.discard(pending.id) })
@@ -105,12 +106,36 @@ struct RoomView: View {
                     ForEach(store.roomUploads) { upload in
                         UploadRow(upload: upload, onRetry: { store.retryUpload(upload.id) }, onDiscard: { store.discardUpload(upload.id) })
                     }
+                    if store.hasNewer {
+                        Button(store.loadingHistory ? "Loading…" : "Load newer messages") { store.loadNewer() }
+                            .buttonStyle(.link)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .onAppear { store.loadNewer() }
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.vertical, 8)
             }
             .defaultScrollAnchor(.bottom)
-            .onChange(of: store.messages.last?.id) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: store.messages.last?.id) { _, _ in
+                guard !store.hasNewer, store.highlightedId == nil else { return }
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onChange(of: store.highlightedId) { _, id in
+                guard let id else { return }
+                // After the page lays out, center the message, and let the mark fade after a while.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { withAnimation { proxy.scrollTo(id, anchor: .center) } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { if store.highlightedId == id { withAnimation { store.clearHighlight() } } }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if store.hasNewer {
+                    Button { store.jump(to: nil) } label: { Label("Jump to newest", systemImage: "arrow.down") }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Brand.accent)
+                        .padding(14)
+                }
+            }
             .onChange(of: store.roomPending.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }

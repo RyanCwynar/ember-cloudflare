@@ -231,6 +231,42 @@ final class APIClient: @unchecked Sendable {
         try await send(ProfileAnswer.self, "/api/users/me/avatar", method: "DELETE").profile
     }
 
+    // MARK: Search
+
+    func search(_ search: Search, sort: String = "newest", cursor: Int? = nil) async throws -> SearchResults {
+        var request = try request("/api/searches")
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.percentEncodedQuery = search.query(sort: sort, cursor: cursor)
+        request.url = components.url
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            let message = (try? JSONDecoder().decode(ProblemAnswer.self, from: data))?.error ?? "The server answered \(status)."
+            throw APIError.server(status: status, message: message)
+        }
+        return try JSONDecoder().decode(SearchResults.self, from: data)
+    }
+
+    private struct RecordedSearch: Encodable {
+        let search: Search
+        let sort: String
+        func encode(to encoder: Encoder) throws {
+            try search.encode(to: encoder)
+            var c = encoder.container(keyedBy: Key.self)
+            try c.encode(sort, forKey: .sort)
+        }
+        enum Key: String, CodingKey { case sort }
+    }
+
+    /// Saves a search among your recent ones and answers its first page.
+    func recordSearch(_ search: Search, sort: String = "newest") async throws -> SearchResults {
+        try await send(SearchResults.self, "/api/searches", method: "POST", body: RecordedSearch(search: search, sort: sort))
+    }
+
+    func clearRecentSearches() async throws {
+        try await sendIgnoringBody("/api/searches", method: "DELETE")
+    }
+
     // MARK: Sockets
 
     /// A WebSocket upgrade request for `path`, carrying the session cookie and the same-origin headers.

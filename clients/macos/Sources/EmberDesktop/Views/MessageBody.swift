@@ -12,7 +12,7 @@ struct MessageBody: View {
                     state.showPerson(url.absoluteString.replacingOccurrences(of: "\(RichTextRenderer.personScheme):", with: ""))
                     return .handled
                 }
-                return .systemAction
+                return state.openInApp(url) ? .handled : .systemAction
             })
     }
 }

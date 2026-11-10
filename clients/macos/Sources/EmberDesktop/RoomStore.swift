@@ -21,6 +21,11 @@ final class RoomStore {
     private(set) var present: [User] = []
     private(set) var typing: [User] = []
     private(set) var hasMore = false
+    /// Whether the timeline shows an older page (after a jump) with newer messages left out.
+    private(set) var hasNewer = false
+    /// The message a jump landed on, which the timeline scrolls to and marks.
+    private(set) var highlightedId: String?
+    private var pendingJump: String??
     private(set) var loadingHistory = false
     private(set) var connected = false
     private(set) var gone = false
@@ -76,6 +81,7 @@ final class RoomStore {
             guard state == .open else { return }
             if !self.pending.isEmpty { self.send(.messageCheck(clientMessageIds: self.pending.map(\.id))) }
             if let thread = self.openThreadId { self.send(.threadOpen(parentId: thread)) }
+            if let jump = self.pendingJump { self.pendingJump = nil; self.jump(to: jump) }
         }
         self.socket = socket
         socket.connect()
@@ -202,6 +208,25 @@ final class RoomStore {
         }
     }
 
+    /// Shows the page around a message, as its permalink does, or the newest page with nil.
+    func jump(to messageId: String?) {
+        guard connected else { pendingJump = .some(messageId); return }
+        if let messageId, messages.contains(where: { $0.id == messageId }), !hasNewer || messageId != messages.last?.id {
+            highlightedId = messageId
+            return
+        }
+        loadingHistory = true
+        send(.historyAround(messageId: messageId))
+    }
+
+    func loadNewer() {
+        guard hasNewer, !loadingHistory, let newest = messages.last else { return }
+        loadingHistory = true
+        send(.historyAfter(after: newest.id))
+    }
+
+    func clearHighlight() { highlightedId = nil }
+
     func loadEarlier() {
         guard hasMore, !loadingHistory, let oldest = messages.first else { return }
         loadingHistory = true
@@ -274,6 +299,7 @@ final class RoomStore {
             self.present = present
             self.seq = seq
             self.hasMore = hasMore
+            hasNewer = false
             reconcilePending(messages)
         case let .resumed(changed, deletedIds, present, seq):
             for message in changed { apply(message) }
@@ -322,6 +348,17 @@ final class RoomStore {
             messages = older.filter { $0.isInRoom && !known.contains($0.id) } + messages
             self.hasMore = hasMore
             loadingHistory = false
+        case let .historyAfter(_, newer, hasNewer):
+            let known = Set(messages.map(\.id))
+            messages += newer.filter { $0.isInRoom && !known.contains($0.id) }
+            self.hasNewer = hasNewer
+            loadingHistory = false
+        case let .historyAround(page, hasMore, hasNewer, around):
+            messages = page.filter(\.isInRoom)
+            self.hasMore = hasMore
+            self.hasNewer = hasNewer
+            highlightedId = around
+            loadingHistory = false
         case let .threadOpened(parentId, parent, replies, hasMore):
             guard parentId == openThreadId else { return }
             threadParent = parent ?? threadParent
@@ -356,7 +393,8 @@ final class RoomStore {
     private func apply(_ message: Message) {
         if let index = messages.firstIndex(where: { $0.id == message.id }) {
             if message.isInRoom { messages[index] = message } else { messages.remove(at: index) }
-        } else if message.isInRoom {
+        } else if message.isInRoom, !(hasNewer && message.createdDate > (messages.last?.createdDate ?? .distantFuture)) {
+            // While an older page shows, newer messages wait for Load newer rather than land after a gap.
             let index = messages.lastIndex { $0.createdDate <= message.createdDate }.map { $0 + 1 } ?? 0
             messages.insert(message, at: index)
         }
