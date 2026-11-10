@@ -44,6 +44,9 @@ struct ThreadPanel: View {
                         ForEach(store.threadPending) { pending in
                             PendingRow(pending: pending, onRetry: { store.retry(pending.id) }, onDiscard: { store.discard(pending.id) })
                         }
+                        ForEach(store.threadUploads) { upload in
+                            UploadRow(upload: upload, onRetry: { store.retryUpload(upload.id) }, onDiscard: { store.discardUpload(upload.id) })
+                        }
                         if store.threadTyping {
                             Text("Ember is answering…").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16)
                         }
@@ -64,7 +67,11 @@ struct ThreadPanel: View {
                         Button("Cancel") { editing = nil; draft = Draft() }.buttonStyle(.link).font(.caption)
                     }
                 }
-                Composer(draft: $draft, placeholder: "Reply…", disabled: store.gone, onSend: submit)
+                Composer(draft: $draft, placeholder: "Reply…", disabled: store.gone,
+                         onAttach: editing == nil ? { urls in
+                             if let parent = store.openThreadId { store.upload(urls, parentId: parent, alsoSend: alsoSend) }
+                         } : nil,
+                         onSend: submit)
                 if editing == nil {
                     Toggle("Also send to the room", isOn: $alsoSend).toggleStyle(.checkbox).font(.caption)
                 }
@@ -72,6 +79,12 @@ struct ThreadPanel: View {
             .padding(12)
         }
         .frame(minWidth: 300, idealWidth: 380)
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard let parent = store.openThreadId, !files.isEmpty else { return false }
+            store.upload(files, parentId: parent, alsoSend: alsoSend)
+            return true
+        }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.4))
     }
 

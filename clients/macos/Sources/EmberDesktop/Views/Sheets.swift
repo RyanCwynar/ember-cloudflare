@@ -14,6 +14,7 @@ struct WorkspaceSheet: View {
         case .profile: ProfileSheet()
         case let .person(id): PersonSheet(userId: id)
         case let .roomSettings(id): RoomSettingsSheet(roomId: id)
+        case let .image(file): ImageViewer(file: file)
         }
     }
 }
@@ -491,22 +492,5 @@ struct ProfileSheet: View {
                 if let saved = try await state.api?.removeAvatar() { profile = saved; state.profileChanged(saved) }
             } catch { self.error = error.localizedDescription }
         }
-    }
-}
-
-extension NSImage {
-    /// The picture scaled down to fit within `box`×`box`, as a JPEG.
-    func jpegFitting(_ box: CGFloat) -> Data? {
-        guard let cg = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let scale = min(1, box / CGFloat(max(cg.width, cg.height)))
-        let width = Int(CGFloat(cg.width) * scale), height = Int(CGFloat(cg.height) * scale)
-        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
-        ctx.interpolationQuality = .high
-        ctx.setFillColor(.white)
-        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let scaled = ctx.makeImage() else { return nil }
-        return NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: 0.88])
     }
 }

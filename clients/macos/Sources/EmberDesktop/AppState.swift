@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -28,6 +29,7 @@ final class AppState {
     enum Sheet: Identifiable, Hashable {
         case newDirect, newRoom, people, profile
         case person(String)
+        case image(StoredFile)
         case roomSettings(String)
 
         var id: String {
@@ -38,6 +40,7 @@ final class AppState {
             case .profile: "profile"
             case let .person(id): "person-\(id)"
             case let .roomSettings(id): "room-\(id)"
+            case let .image(file): "image-\(file.id)"
             }
         }
     }
@@ -154,6 +157,29 @@ final class AppState {
     }
 
     func showPerson(_ userId: String) { sheet = .person(userId) }
+
+    /// Downloads a file with the session's cookie to Downloads, then shows it in Finder.
+    func download(_ file: StoredFile) {
+        guard let api, let url = api.absolute(file.downloadUrl) else { return }
+        Task {
+            do {
+                let (temporary, response) = try await api.session.download(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.server(status: 0, message: "Couldn't download \(file.name).") }
+                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                var target = downloads.appendingPathComponent(file.name)
+                var n = 1
+                while FileManager.default.fileExists(atPath: target.path) {
+                    n += 1
+                    let base = (file.name as NSString).deletingPathExtension, ext = (file.name as NSString).pathExtension
+                    target = downloads.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+                }
+                try FileManager.default.moveItem(at: temporary, to: target)
+                NSWorkspace.shared.activateFileViewerSelecting([target])
+            } catch {
+                connectionProblem = error.localizedDescription
+            }
+        }
+    }
 
     /// Everyone in the directory, active people first, by name.
     var directory: [DirectoryUser] {

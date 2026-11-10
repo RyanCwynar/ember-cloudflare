@@ -7,6 +7,7 @@ struct RoomView: View {
 
     @State private var draft = Draft()
     @State private var editing: Message?
+    @State private var dropTargeted = false
 
     var body: some View {
         HSplitView {
@@ -16,6 +17,21 @@ struct RoomView: View {
                 composer
             }
             .frame(minWidth: 380)
+            .dropDestination(for: URL.self) { urls, _ in
+                let files = urls.filter(\.isFileURL)
+                guard !files.isEmpty, !store.gone else { return false }
+                store.upload(files)
+                return true
+            } isTargeted: { dropTargeted = $0 }
+            .overlay {
+                if dropTargeted {
+                    RoundedRectangle(cornerRadius: 10).stroke(Brand.accent, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                        .background(Brand.accent.opacity(0.06))
+                        .overlay(Text("Drop to upload to \(room.isDirect ? state.title(of: room) : "#" + state.title(of: room))").font(.title3.bold()))
+                        .padding(8)
+                        .allowsHitTesting(false)
+                }
+            }
             if store.openThreadId != nil {
                 ThreadPanel(store: store)
             }
@@ -86,6 +102,9 @@ struct RoomView: View {
                     ForEach(store.roomPending) { pending in
                         PendingRow(pending: pending, onRetry: { store.retry(pending.id) }, onDiscard: { store.discard(pending.id) })
                     }
+                    ForEach(store.roomUploads) { upload in
+                        UploadRow(upload: upload, onRetry: { store.retryUpload(upload.id) }, onDiscard: { store.discardUpload(upload.id) })
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.vertical, 8)
@@ -122,6 +141,7 @@ struct RoomView: View {
             }
             Composer(draft: $draft, placeholder: placeholder, disabled: store.gone,
                      onChange: { text in if editing == nil { store.composerChanged(isEmpty: text.isEmpty) } },
+                     onAttach: editing == nil ? { store.upload($0) } : nil,
                      onSend: submit)
                 .id(editing?.id ?? "new")
         }

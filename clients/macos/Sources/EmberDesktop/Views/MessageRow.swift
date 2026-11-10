@@ -137,30 +137,6 @@ struct MessageRow: View {
     }
 }
 
-struct Attachment: View {
-    @Environment(AppState.self) private var state
-    let file: StoredFile
-
-    var body: some View {
-        if file.isImage, let url = state.api?.absolute(file.previewUrl ?? file.url) {
-            Link(destination: state.api?.absolute(file.url) ?? url) {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.15))
-                }
-                .frame(maxWidth: 360, maxHeight: 240, alignment: .leading)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-        } else if let url = state.api?.absolute(file.downloadUrl) {
-            Link(destination: url) {
-                Label("\(file.name) (\(ByteCountFormatter.string(fromByteCount: Int64(file.byteSize), countStyle: .file)))",
-                      systemImage: "doc")
-            }
-        }
-    }
-}
-
 struct PendingRow: View {
     let pending: RoomStore.PendingMessage
     let onRetry: () -> Void

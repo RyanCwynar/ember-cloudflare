@@ -101,6 +101,61 @@ final class RoomStore {
         send(.presenceVisible(visible))
     }
 
+    // MARK: Uploads
+
+    struct UploadItem: Identifiable, Hashable {
+        let id: String  // the file message's clientMessageId
+        let url: URL
+        let parentId: String?
+        let alsoSend: Bool
+        var progress: Double = 0
+        var failed: String?
+        var name: String { url.lastPathComponent }
+    }
+
+    private(set) var uploads: [UploadItem] = []
+    var roomUploads: [UploadItem] { uploads.filter { $0.parentId == nil } }
+    var threadUploads: [UploadItem] { uploads.filter { $0.parentId != nil && $0.parentId == openThreadId } }
+
+    /// Uploads files to the room, or with `parentId` to that thread, each as its own file message.
+    func upload(_ urls: [URL], parentId: String? = nil, alsoSend: Bool = false) {
+        for url in urls {
+            let item = UploadItem(id: UUID().uuidString.lowercased(), url: url, parentId: parentId, alsoSend: alsoSend)
+            uploads.append(item)
+            run(item)
+        }
+    }
+
+    func retryUpload(_ id: String) {
+        guard let index = uploads.firstIndex(where: { $0.id == id }) else { return }
+        uploads[index].failed = nil
+        uploads[index].progress = 0
+        run(uploads[index])
+    }
+
+    func discardUpload(_ id: String) {
+        uploads.removeAll { $0.id == id }
+    }
+
+    private func run(_ item: UploadItem) {
+        Task {
+            // Files picked in an open panel are security-scoped; dropped and pasted ones aren't.
+            let scoped = item.url.startAccessingSecurityScopedResource()
+            defer { if scoped { item.url.stopAccessingSecurityScopedResource() } }
+            do {
+                let message = try await Uploads.upload(
+                    item.url, to: roomId, api: api, clientMessageId: item.id, parentId: item.parentId, alsoSend: item.alsoSend,
+                    progress: { [weak self] value in
+                        if let index = self?.uploads.firstIndex(where: { $0.id == item.id }) { self?.uploads[index].progress = value }
+                    })
+                apply(message)
+                uploads.removeAll { $0.id == item.id }
+            } catch {
+                if let index = uploads.firstIndex(where: { $0.id == item.id }) { uploads[index].failed = error.localizedDescription }
+            }
+        }
+    }
+
     var roomPending: [PendingMessage] { pending.filter(\.showsInRoom).filter { $0.parentId == nil } }
     var threadPending: [PendingMessage] { pending.filter { $0.parentId != nil && $0.parentId == openThreadId } }
 
@@ -232,6 +287,7 @@ final class RoomStore {
             clearTyping(message.creator.id)
             apply(message)
             pending.removeAll { $0.id == message.clientMessageId }
+            uploads.removeAll { $0.id == message.clientMessageId && $0.progress >= 1 }
         case let .messageUpdated(message, seq):
             self.seq = seq
             apply(message)

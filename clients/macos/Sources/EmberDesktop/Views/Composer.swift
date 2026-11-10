@@ -19,15 +19,25 @@ struct Composer: View {
     let placeholder: String
     var disabled = false
     var onChange: (String) -> Void = { _ in }
+    /// Takes files picked, pasted or dropped on the composer; nil hides the paperclip.
+    var onAttach: (([URL]) -> Void)?
     let onSend: () -> Void
 
     @FocusState private var focused: Bool
     @State private var highlighted = 0
+    @State private var choosingFiles = false
+    @State private var pasteMonitor: Any?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !suggestions.isEmpty { suggestionList }
             HStack(alignment: .bottom, spacing: 8) {
+                if onAttach != nil {
+                    Button { choosingFiles = true } label: { Image(systemName: "paperclip") }
+                        .buttonStyle(.borderless)
+                        .disabled(disabled)
+                        .help("Attach files")
+                }
                 TextField(placeholder, text: $draft.text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...10)
@@ -67,7 +77,30 @@ struct Composer: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(focused ? Brand.accent.opacity(0.6) : Color.secondary.opacity(0.3)))
         }
-        .onAppear { focused = true }
+        .onAppear { focused = true; watchPaste() }
+        .onDisappear { if let pasteMonitor { NSEvent.removeMonitor(pasteMonitor) } }
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case let .success(urls) = result, !urls.isEmpty { onAttach?(urls) }
+        }
+    }
+
+    /// ⌘V with a picture or files on the pasteboard, and no text, attaches them; text pastes as usual.
+    private func watchPaste() {
+        guard onAttach != nil, pasteMonitor == nil else { return }
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard focused, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "v" else { return event }
+            let board = NSPasteboard.general
+            if let files = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !files.isEmpty {
+                onAttach?(files)
+                return nil
+            }
+            if board.string(forType: .string) == nil, let image = NSImage(pasteboard: board), let file = Uploads.temporaryFile(for: image) {
+                onAttach?([file])
+                return nil
+            }
+            return event
+        }
     }
 
     private func send() {
