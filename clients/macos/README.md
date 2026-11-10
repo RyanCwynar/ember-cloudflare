@@ -47,10 +47,21 @@ the email and password you use on the web.
   leave it.
 - **People.** A searchable directory. Each person's profile has a Message button. You can edit your
   own name, bio, email, password and photo.
+- **Files.** Attach with the paperclip, drag and drop, or paste a picture or files, into a room or a
+  thread. Large files upload in parts, with progress. Pictures open full size, videos play inline, and
+  other files download to Downloads.
+- **Search (⌘F).** The web app's filters (room, person, mentions me, has a link, has a file, in a
+  thread), newest or oldest first, recent searches, and paging. A result opens its room at that
+  message, or its thread.
+- **Permalinks.** Copy Link on any message. Links to your Ember inside messages open in the app. A room
+  opened at an older message loads newer ones as you scroll, and has a Jump to newest button.
+- **Huddles.** Start or join a room's huddle from the headphones in its header. While you're in one, a
+  bar in the sidebar shows who's there and has Mute (⇧⌘D) and Leave. Rooms with a huddle going on show
+  headphones in the sidebar.
+- **Workspace administration.** Workspace settings, custom styles, chat bots and AI agents open the
+  web app's own pages inside the app, signed in with your session.
 - **Notifications.** When a room turns unread while the app is in the background, it posts a local
   notification. Clicking it opens that room.
-
-Not yet: uploads, search, message permalinks, workspace administration, and huddles.
 
 ## How it talks to Ember
 
@@ -70,6 +81,15 @@ The frame types are mirrored in `Sources/EmberDesktop/Frames.swift`. If `package
 frame or bumps `ROOM_PROTOCOL`, update that file to match. Unknown frame types are ignored, so a newer
 server won't break an older client.
 
+## Huddles
+
+macOS has WebRTC only in WebKit, so the call runs in a hidden web view. `HuddleEngine.swift` is
+`apps/web/src/lib/huddle.ts` ported to plain JavaScript. Keep the two in step. The page is loaded at
+the Ember's own origin, with the app's cookies, so its socket passes the Worker's same-origin check.
+The web view sets `inactiveSchedulingPolicy = .none`; without it, WebKit suspends the view (it's never
+in a window) and the call drops. If the microphone permission prompt never gets an answer, the engine
+joins listening only after 8 seconds.
+
 ## Push notifications
 
 Ember's push uses Web Push (VAPID), which a native app can't receive. So the client only notifies
@@ -87,4 +107,7 @@ To also run the live test against a running Ember (for example `pnpm dev` in `ap
 EMBER_TEST_SERVER=http://localhost:8787 EMBER_TEST_EMAIL=… EMBER_TEST_PASSWORD=… swift test
 ```
 
-The live test signs in, loads the sidebar, opens a room, sends a message, reacts to it, and deletes it.
+The live tests cover: signing in; messages, reactions and threads; DMs, rooms, stars, notification
+levels and profiles (with a second person signed in as a guest, which `pnpm dev` allows); uploads and
+downloads; search and jumping to messages; the admin web view's session; and the huddle socket. A
+server without huddles set up answers that they're off, which the huddle test accepts.

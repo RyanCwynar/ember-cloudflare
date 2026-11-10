@@ -75,10 +75,21 @@ struct Favorites: Codable, Hashable {
     let version: Int
 }
 
+struct LiveHuddle: Codable, Hashable {
+    let startedAt: String
+    let userIds: [String]
+}
+
 struct Sidebar: Codable {
     let rooms: [Room]
     let favorites: Favorites
     let sharedOrder: [String]
+    let huddles: [String: LiveHuddle]?
+}
+
+/// The workspace settings the app needs from `Account`.
+struct AccountSummary: Codable {
+    let huddles: Bool?
 }
 
 struct Boost: Codable, Hashable, Identifiable {

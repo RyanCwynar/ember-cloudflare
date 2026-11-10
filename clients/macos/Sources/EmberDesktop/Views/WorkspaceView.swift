@@ -22,7 +22,12 @@ struct WorkspaceView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 240)
-            .safeAreaInset(edge: .bottom) { accountBar }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 6) {
+                    HuddleBar()
+                    accountBar
+                }
+            }
         } detail: {
             if let id = state.selectedRoomId, let room = state.room(id), let store = state.store(for: id) {
                 RoomView(room: room, store: store)
@@ -123,6 +128,9 @@ struct RoomRow: View {
                 .fontWeight(room.unread ? .bold : .regular)
                 .lineLimit(1)
             Spacer()
+            if let live = state.liveHuddles[room.id], !live.userIds.isEmpty {
+                Image(systemName: "headphones").font(.caption).foregroundStyle(.green).help("\(live.userIds.count) in a huddle")
+            }
             if room.involvement == "nothing" {
                 Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary)
             }

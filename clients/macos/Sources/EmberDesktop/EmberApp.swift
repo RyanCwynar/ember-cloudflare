@@ -21,6 +21,9 @@ struct EmberApp: App {
                     state.setAppActive(false)
                 }
                 .onChange(of: state.unreadCount) { _, count in Notifier.shared.setBadge(count) }
+                .alert("Huddle ended", isPresented: Binding(get: { state.huddle.ended != nil }, set: { if !$0 { state.huddle.ended = nil } })) {
+                    Button("OK") { state.huddle.ended = nil }
+                } message: { Text(state.huddle.ended ?? "") }
                 .onAppear {
                     Notifier.shared.openRoom = { id in state.selectedRoomId = id }
                 }

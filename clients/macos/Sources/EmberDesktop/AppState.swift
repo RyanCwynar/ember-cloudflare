@@ -20,6 +20,11 @@ final class AppState {
     private(set) var sharedOrder: [String] = []
     private(set) var people: [String: DirectoryUser] = [:]
     var selectedRoomId: String?
+    /// Whether an administrator has turned huddles on.
+    private(set) var huddlesEnabled = false
+    /// The huddles going on in my rooms, by room.
+    private(set) var liveHuddles: [String: LiveHuddle] = [:]
+    let huddle = HuddleController()
     var appIsActive = true
     var connectionProblem: String?
 
@@ -78,6 +83,7 @@ final class AppState {
     }
 
     func signOut() async {
+        huddle.leave()
         workspaceSocket?.close()
         roomStores.values.forEach { $0.close() }
         roomStores = [:]
@@ -106,6 +112,7 @@ final class AppState {
             rooms = sidebar.rooms
             favorites = sidebar.favorites.rooms
             sharedOrder = sidebar.sharedOrder
+            liveHuddles = sidebar.huddles ?? [:]
         } catch APIError.notSignedIn {
             await signOut()
         } catch {
@@ -160,6 +167,12 @@ final class AppState {
     }
 
     func showPerson(_ userId: String) { sheet = .person(userId) }
+
+    /// Starts or joins the huddle in a room, leaving any other.
+    func joinHuddle(in roomId: String) {
+        guard let api else { return }
+        huddle.join(roomId: roomId, api: api)
+    }
 
     // MARK: Permalinks
 
@@ -379,8 +392,13 @@ final class AppState {
     private func handleWorkspace(_ text: String) {
         guard let frame = try? JSONDecoder().decode(WorkspaceServerFrame.self, from: Data(text.utf8)) else { return }
         switch frame {
-        case let .welcome(you):
+        case let .welcome(you, account):
             me = you
+            if let on = account?.huddles { huddlesEnabled = on }
+        case let .accountUpdated(account):
+            if let on = account.huddles { huddlesEnabled = on }
+        case let .roomHuddle(id, live):
+            liveHuddles[id] = live
         case let .roomUnread(id):
             guard let index = rooms.firstIndex(where: { $0.id == id }) else { return }
             let onScreen = id == selectedRoomId && appIsActive

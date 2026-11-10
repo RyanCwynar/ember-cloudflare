@@ -110,7 +110,9 @@ enum RoomServerFrame: Decodable {
 }
 
 enum WorkspaceServerFrame: Decodable {
-    case welcome(you: Me)
+    case welcome(you: Me, account: AccountSummary?)
+    case accountUpdated(AccountSummary)
+    case roomHuddle(String, huddle: LiveHuddle?)
     case roomUnread(String)
     case roomRead(String)
     case userUpdated(DirectoryUser)
@@ -125,14 +127,17 @@ enum WorkspaceServerFrame: Decodable {
     case other(String)
 
     private enum K: String, CodingKey {
-        case type, you, roomId, user, room, at, favorites, involvement, message
+        case type, you, roomId, user, room, at, favorites, involvement, message, account, huddle
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: K.self)
         let type = try c.decode(String.self, forKey: .type)
         switch type {
-        case "welcome": self = .welcome(you: try c.decode(Me.self, forKey: .you))
+        case "welcome": self = .welcome(you: try c.decode(Me.self, forKey: .you), account: try? c.decode(AccountSummary.self, forKey: .account))
+        case "account.updated": self = .accountUpdated(try c.decode(AccountSummary.self, forKey: .account))
+        case "room.huddle":
+            self = .roomHuddle(try c.decode(String.self, forKey: .roomId), huddle: try c.decodeIfPresent(LiveHuddle.self, forKey: .huddle))
         case "room.unread": self = .roomUnread(try c.decode(String.self, forKey: .roomId))
         case "room.read": self = .roomRead(try c.decode(String.self, forKey: .roomId))
         case "user.updated": self = .userUpdated(try c.decode(DirectoryUser.self, forKey: .user))

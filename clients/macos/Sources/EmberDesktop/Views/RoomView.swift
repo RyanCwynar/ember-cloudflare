@@ -40,6 +40,9 @@ struct RoomView: View {
         .navigationSubtitle(subtitle)
         .toolbar {
             ToolbarItemGroup {
+                if state.huddlesEnabled || state.liveHuddles[room.id] != nil || state.huddle.roomId == room.id {
+                    HuddleButton(room: room)
+                }
                 Button { Task { await state.toggleStar(room.id) } } label: {
                     Image(systemName: state.isStarred(room.id) ? "star.fill" : "star")
                         .foregroundStyle(state.isStarred(room.id) ? Brand.accent : .secondary)
